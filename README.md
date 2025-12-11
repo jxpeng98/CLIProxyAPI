@@ -69,6 +69,12 @@ CLIProxyAPI includes integrated support for [Amp CLI](https://ampcode.com) and A
 - Watcher: [docs/sdk-watcher.md](docs/sdk-watcher.md)
 - Custom Provider Example: `examples/custom-provider`
 
+## Containers (Docker / Podman)
+
+- Docker: run `./docker-build.sh` and choose whether to pull or build locally.
+- Podman (local-only): run `./podman-build.sh` — option 2 builds the image as `localhost/cli-proxy-api:local`, option 1 reuses that local image; pulls are disabled in `podman-compose.yml`.
+- Manual Podman example: `CLI_PROXY_IMAGE=localhost/cli-proxy-api:local podman compose -f podman-compose.yml up -d --build --pull never`
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.

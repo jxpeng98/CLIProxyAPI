@@ -23,17 +23,20 @@ else
 fi
 
 COMPOSE_CMD_PRETTY="${COMPOSE_CMD[*]}"
+CLI_PROXY_IMAGE_DEFAULT="${CLI_PROXY_IMAGE:-localhost/cli-proxy-api:local}"
+export CLI_PROXY_IMAGE="${CLI_PROXY_IMAGE_DEFAULT}"
 
 echo "Please select an option:"
-echo "1) Run using Pre-built Image (Recommended)"
+echo "1) Run using existing local image (no pull/build)"
 echo "2) Build from Source and Run (For Developers)"
 read -r -p "Enter choice [1-2]: " choice
 
 case "$choice" in
   1)
-    echo "--- Running with Pre-built Image (Podman) ---"
-    "${COMPOSE_CMD[@]}" -f podman-compose.yml up -d --remove-orphans --no-build
-    echo "Services are starting from remote image."
+    echo "--- Running with existing local image (Podman) ---"
+    echo "Using image: ${CLI_PROXY_IMAGE}"
+    "${COMPOSE_CMD[@]}" -f podman-compose.yml up -d --remove-orphans --no-build --pull never
+    echo "Services are starting from local image."
     echo "Run '${COMPOSE_CMD_PRETTY} -f podman-compose.yml logs -f' to see the logs."
     ;;
   2)
@@ -49,8 +52,9 @@ case "$choice" in
     echo "  Build Date: ${BUILD_DATE}"
     echo "----------------------------------------"
 
-    export CLI_PROXY_IMAGE="cli-proxy-api:local"
-    
+    export CLI_PROXY_IMAGE="${CLI_PROXY_IMAGE_DEFAULT}"
+    echo "Using image: ${CLI_PROXY_IMAGE}"
+
     echo "Building the Podman image..."
     "${COMPOSE_CMD[@]}" -f podman-compose.yml build \
       --build-arg VERSION="${VERSION}" \

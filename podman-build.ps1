@@ -30,16 +30,22 @@ function Invoke-Compose {
     & $Script:ComposeInvoker @Args
 }
 
+if (-not $env:CLI_PROXY_IMAGE -or $env:CLI_PROXY_IMAGE -eq "") {
+    $env:CLI_PROXY_IMAGE = "localhost/cli-proxy-api:local"
+}
+$cliProxyImage = $env:CLI_PROXY_IMAGE
+
 Write-Host "Please select an option:"
-Write-Host "1) Run using Pre-built Image (Recommended)"
+Write-Host "1) Run using existing local image (no pull/build)"
 Write-Host "2) Build from Source and Run (For Developers)"
 $choice = Read-Host -Prompt "Enter choice [1-2]"
 
 switch ($choice) {
     "1" {
-        Write-Host "--- Running with Pre-built Image (Podman) ---"
-        Invoke-Compose @("-f", "podman-compose.yml", "up", "-d", "--remove-orphans", "--no-build")
-        Write-Host "Services are starting from remote image."
+        Write-Host "--- Running with existing local image (Podman) ---"
+        Write-Host "Using image: $cliProxyImage"
+        Invoke-Compose @("-f", "podman-compose.yml", "up", "-d", "--remove-orphans", "--no-build", "--pull", "never")
+        Write-Host "Services are starting from local image."
         Write-Host "Run '$Script:ComposeCommandName -f podman-compose.yml logs -f' to see the logs."
     }
     "2" {
@@ -55,7 +61,8 @@ switch ($choice) {
         Write-Host "  Build Date: $BUILD_DATE"
         Write-Host "----------------------------------------"
 
-        $env:CLI_PROXY_IMAGE = "cli-proxy-api:local"
+        $env:CLI_PROXY_IMAGE = $cliProxyImage
+        Write-Host "Using image: $cliProxyImage"
         
         Write-Host "Building the Podman image..."
         Invoke-Compose @("-f", "podman-compose.yml", "build", "--build-arg", "VERSION=$VERSION", "--build-arg", "COMMIT=$COMMIT", "--build-arg", "BUILD_DATE=$BUILD_DATE")
