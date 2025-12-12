@@ -25,4 +25,10 @@ services:
       - ./config.yaml:/CLIProxyAPI/config.yaml
       - ./auths:/root/.cli-proxy-api
       - ./logs:/CLIProxyAPI/logs
+    networks:
+      - infra-net
     restart: unless-stopped
+
+networks:
+  infra-net:
+    external: true
