@@ -27,15 +27,13 @@ jobs:
 
       - name: Add upstream remote
         run: |
-          # 获取fork的源仓库URL
           UPSTREAM_URL=$(gh api repos/${{ github.repository }} --jq '.parent.clone_url // .clone_url')
-          
-          # 如果没有parent（不是fork），则退出
+
           if [ -z "$UPSTREAM_URL" ] || [ "$UPSTREAM_URL" = "null" ]; then
             echo "This repository is not a fork, skipping sync."
             exit 0
           fi
-          
+
           echo "Upstream URL: $UPSTREAM_URL"
           git remote add upstream "$UPSTREAM_URL" || git remote set-url upstream "$UPSTREAM_URL"
           git fetch upstream --tags
@@ -45,25 +43,22 @@ jobs:
       - name: Check for new upstream tags
         id: check_tags
         run: |
-          # 获取upstream的最新tag
-          LATEST_UPSTREAM_TAG=$(git tag -l --sort=-version:refname | grep -v "^v" | head -n 1 || git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "")
-          
+          LATEST_UPSTREAM_TAG=$(git ls-remote --tags upstream | awk '{print $2}' | sed 's#refs/tags/##' | grep -v '\^{}' | sort -Vr | head -n 1 || echo "")
+
           if [ -z "$LATEST_UPSTREAM_TAG" ]; then
             LATEST_UPSTREAM_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "none")
           fi
-          
+
           echo "Latest upstream tag: $LATEST_UPSTREAM_TAG"
-          
-          # 获取本地最新同步的tag (检查是否存在sync-upstream-tag文件)
+
           if [ -f .github/sync-upstream-tag ]; then
             LAST_SYNCED_TAG=$(cat .github/sync-upstream-tag)
           else
             LAST_SYNCED_TAG="none"
           fi
-          
+
           echo "Last synced tag: $LAST_SYNCED_TAG"
-          
-          # 比较tags
+
           if [ "$LATEST_UPSTREAM_TAG" != "$LAST_SYNCED_TAG" ] && [ "$LATEST_UPSTREAM_TAG" != "none" ]; then
             echo "new_tag_found=true" >> $GITHUB_OUTPUT
             echo "latest_tag=$LATEST_UPSTREAM_TAG" >> $GITHUB_OUTPUT
@@ -75,31 +70,25 @@ jobs:
 
       - name: Create sync branch and PR
         if: steps.check_tags.outputs.new_tag_found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           LATEST_TAG="${{ steps.check_tags.outputs.latest_tag }}"
           BRANCH_NAME="sync-upstream-${LATEST_TAG}"
-          
-          # 创建新分支
-          git checkout -b "$BRANCH_NAME"
-          
-          # 尝试合并upstream/main
-          echo "Attempting to merge upstream/main..."
-          if git merge upstream/main --no-edit -m "Merge upstream main (tag: ${LATEST_TAG})"; then
-            echo "Merge successful"
-            
-            # 记录已同步的tag
-            mkdir -p .github
-            echo "$LATEST_TAG" > .github/sync-upstream-tag
-            git add .github/sync-upstream-tag
-            git commit -m "Update sync tag marker to ${LATEST_TAG}" || true
-            
-            # 推送分支
-            git push origin "$BRANCH_NAME"
-            
-            # 创建Pull Request
-            gh pr create \
-              --title "🔄 Sync with upstream (${LATEST_TAG})" \
-              --body "## Upstream Sync
+
+          git fetch upstream main
+          git checkout -B "$BRANCH_NAME" upstream/main
+
+          mkdir -p .github
+          echo "$LATEST_TAG" > .github/sync-upstream-tag
+          git add .github/sync-upstream-tag
+          git commit -m "Track upstream sync tag ${LATEST_TAG}" --allow-empty
+
+          git push --force origin "$BRANCH_NAME"
+
+          PR_BODY=$(cat <<EOF2
+## Upstream Sync
 
 This PR syncs the repository with upstream changes.
 
@@ -112,55 +101,28 @@ This PR includes all changes from the upstream main branch up to tag \`${LATEST_
 Please review the changes carefully before merging.
 
 ---
-*This PR was automatically created by the sync-upstream workflow.*" \
+*This PR was automatically created by the sync-upstream workflow.*
+EOF2
+)
+
+          EXISTING_PR=$(gh pr list --state open --head "$BRANCH_NAME" --base main --json number --jq '.[0].number' || true)
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #$EXISTING_PR already exists for $BRANCH_NAME."
+          else
+            gh pr create \
+              --title "Sync with upstream (${LATEST_TAG})" \
+              --body "$PR_BODY" \
               --base main \
               --head "$BRANCH_NAME" \
               --label "upstream-sync"
-            
-            echo "Pull request created successfully!"
-          else
-            echo "Merge conflicts detected. Manual intervention required."
-            
-            # 即使有冲突，也推送分支
-            git push origin "$BRANCH_NAME" || true
-            
-            # 创建PR说明有冲突
-            gh pr create \
-              --title "⚠️ Sync with upstream (${LATEST_TAG}) - CONFLICTS" \
-              --body "## Upstream Sync - Manual Resolution Required
-
-This PR attempts to sync the repository with upstream changes but encountered **merge conflicts**.
-
-**Upstream Tag:** \`${LATEST_TAG}\`
-**Source:** upstream/main
-
-### ⚠️ Action Required
-Please resolve the merge conflicts manually:
-
-\`\`\`bash
-git fetch origin
-git checkout $BRANCH_NAME
-git merge upstream/main
-# Resolve conflicts
-git add .
-git commit
-git push origin $BRANCH_NAME
-\`\`\`
-
----
-*This PR was automatically created by the sync-upstream workflow.*" \
-              --base main \
-              --head "$BRANCH_NAME" \
-              --label "upstream-sync,conflicts" || echo "Failed to create PR, branch may already exist"
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summary
         if: always()
         run: |
           if [ "${{ steps.check_tags.outputs.new_tag_found }}" = "true" ]; then
-            echo "✅ New upstream tag detected and PR created: ${{ steps.check_tags.outputs.latest_tag }}"
+            echo "[OK] Checked upstream tag: ${{ steps.check_tags.outputs.latest_tag }}"
           else
-            echo "ℹ️ No new upstream tags found. Repository is up to date."
+            echo "[INFO] No new upstream tags found. Repository is up to date."
           fi
