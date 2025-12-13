@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 jobs:
   check-upstream:
@@ -129,9 +130,16 @@ jobs:
 
           git push --force origin "$branch_name"
 
-          # 确保 label 存在（不存在则创建）
-          if ! gh label list --json name --jq '.[].name' | grep -qx "upstream-sync"; then
-            gh label create "upstream-sync" --description "Automated upstream sync PRs" --color "BFDADC" || true
+          # 尝试创建 label（失败不阻塞流程）
+          label_available=false
+          if gh label list --json name --jq '.[].name' 2>/dev/null | grep -qx "upstream-sync"; then
+            label_available=true
+          else
+            if gh label create "upstream-sync" --description "Automated upstream sync PRs" --color "BFDADC" 2>/dev/null; then
+              label_available=true
+            else
+              echo "::warning::Unable to create 'upstream-sync' label (permission denied or already exists). PR will be created without label."
+            fi
           fi
 
           # PR body：用 printf 生成，避免 YAML/编辑器误解析多行内容
@@ -146,10 +154,45 @@ jobs:
           if [ -n "${existing_pr:-}" ] && [ "${existing_pr:-}" != "null" ]; then
             echo "PR #$existing_pr already exists for $branch_name."
           else
-            gh pr create \
-              --title "Sync upstream ${latest_tag} (tag commit)" \
-              --body "$pr_body" \
-              --base main \
-              --head "$branch_name" \
-              --label "upstream-sync"
+            # 根据 label 是否可用决定是否添加 --label 参数
+            if [ "$label_available" = "true" ]; then
+              gh pr create \
+                --title "Sync upstream ${latest_tag} (tag commit)" \
+                --body "$pr_body" \
+                --base main \
+                --head "$branch_name" \
+                --label "upstream-sync"
+            else
+              gh pr create \
+                --title "Sync upstream ${latest_tag} (tag commit)" \
+                --body "$pr_body" \
+                --base main \
+                --head "$branch_name"
+            fi
+
+            # 获取刚创建的 PR 编号
+            new_pr="$(gh pr list --state open --head "$branch_name" --base main --json number --jq '.[0].number' || true)"
+            if [ -n "${new_pr:-}" ] && [ "${new_pr:-}" != "null" ]; then
+              echo "Checking PR #$new_pr for conflicts..."
+              
+              # 等待 GitHub 计算 mergeable 状态（最多等待 30 秒）
+              for i in {1..6}; do
+                mergeable="$(gh pr view "$new_pr" --json mergeable --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
+                if [ "$mergeable" != "UNKNOWN" ]; then
+                  break
+                fi
+                echo "Waiting for mergeable status... ($i/6)"
+                sleep 5
+              done
+              
+              if [ "$mergeable" = "CONFLICTING" ]; then
+                echo "::error::PR #$new_pr has merge conflicts! Please resolve conflicts manually."
+                echo "::warning::Upstream tag ${latest_tag} could not be auto-merged due to conflicts."
+              elif [ "$mergeable" = "MERGEABLE" ]; then
+                echo "No conflicts detected. Enabling auto-merge for PR #$new_pr..."
+                gh pr merge "$new_pr" --auto --squash || echo "::warning::Failed to enable auto-merge. You may need to enable it in repo settings or merge manually."
+              else
+                echo "::warning::Unable to determine mergeable status (status: $mergeable). Skipping auto-merge."
+              fi
+            fi
           fi
