@@ -150,13 +150,17 @@ jobs:
             "- Upstream tag: \`${latest_tag}\`" \
             "- Tag commit: \`${tag_commit}\`")"
 
-          existing_pr="$(gh pr list --state open --head "$branch_name" --base main --json number --jq '.[0].number' || true)"
+          # 显式指定仓库，确保 PR 创建在自己的 fork 而不是 upstream
+          repo="${{ github.repository }}"
+
+          existing_pr="$(gh pr list --repo "$repo" --state open --head "$branch_name" --base main --json number --jq '.[0].number' || true)"
           if [ -n "${existing_pr:-}" ] && [ "${existing_pr:-}" != "null" ]; then
             echo "PR #$existing_pr already exists for $branch_name."
           else
             # 根据 label 是否可用决定是否添加 --label 参数
             if [ "$label_available" = "true" ]; then
               gh pr create \
+                --repo "$repo" \
                 --title "Sync upstream ${latest_tag} (tag commit)" \
                 --body "$pr_body" \
                 --base main \
@@ -164,6 +168,7 @@ jobs:
                 --label "upstream-sync"
             else
               gh pr create \
+                --repo "$repo" \
                 --title "Sync upstream ${latest_tag} (tag commit)" \
                 --body "$pr_body" \
                 --base main \
@@ -171,13 +176,13 @@ jobs:
             fi
 
             # 获取刚创建的 PR 编号
-            new_pr="$(gh pr list --state open --head "$branch_name" --base main --json number --jq '.[0].number' || true)"
+            new_pr="$(gh pr list --repo "$repo" --state open --head "$branch_name" --base main --json number --jq '.[0].number' || true)"
             if [ -n "${new_pr:-}" ] && [ "${new_pr:-}" != "null" ]; then
               echo "Checking PR #$new_pr for conflicts..."
               
               # 等待 GitHub 计算 mergeable 状态（最多等待 30 秒）
               for i in {1..6}; do
-                mergeable="$(gh pr view "$new_pr" --json mergeable --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
+                mergeable="$(gh pr view "$new_pr" --repo "$repo" --json mergeable --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
                 if [ "$mergeable" != "UNKNOWN" ]; then
                   break
                 fi
@@ -190,7 +195,7 @@ jobs:
                 echo "::warning::Upstream tag ${latest_tag} could not be auto-merged due to conflicts."
               elif [ "$mergeable" = "MERGEABLE" ]; then
                 echo "No conflicts detected. Enabling auto-merge for PR #$new_pr..."
-                gh pr merge "$new_pr" --auto --squash || echo "::warning::Failed to enable auto-merge. You may need to enable it in repo settings or merge manually."
+                gh pr merge "$new_pr" --repo "$repo" --auto --squash || echo "::warning::Failed to enable auto-merge. You may need to enable it in repo settings or merge manually."
               else
                 echo "::warning::Unable to determine mergeable status (status: $mergeable). Skipping auto-merge."
               fi
