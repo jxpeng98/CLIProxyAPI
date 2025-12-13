@@ -144,7 +144,7 @@ jobs:
 
           # PR body：用 printf 生成，避免 YAML/编辑器误解析多行内容
           pr_body="$(printf '%s\n%s\n%s\n%s\n%s\n' \
-            '## Upstream Sync (tag commit)' \
+            '## Upstream Sync' \
             '' \
             "This PR merges the commit pointed to by upstream tag \`${latest_tag}\` into \`main\`." \
             "- Upstream tag: \`${latest_tag}\`" \
@@ -161,7 +161,7 @@ jobs:
             if [ "$label_available" = "true" ]; then
               gh pr create \
                 --repo "$repo" \
-                --title "Sync upstream ${latest_tag} (tag commit)" \
+                --title "Sync upstream ${latest_tag}" \
                 --body "$pr_body" \
                 --base main \
                 --head "$branch_name" \
@@ -169,7 +169,7 @@ jobs:
             else
               gh pr create \
                 --repo "$repo" \
-                --title "Sync upstream ${latest_tag} (tag commit)" \
+                --title "Sync upstream ${latest_tag}" \
                 --body "$pr_body" \
                 --base main \
                 --head "$branch_name"
